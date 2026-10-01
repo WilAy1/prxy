@@ -9,6 +9,7 @@ use forwarder::forwarder::forwarder;
 // use server::handle_b_server;
 // use client::handle_b_client;
 
-fn main() {
-    let _ = forwarder();
+#[tokio::main]
+async fn main() {
+    let _ = forwarder().await;
 }

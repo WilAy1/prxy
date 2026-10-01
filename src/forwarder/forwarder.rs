@@ -1,55 +1,57 @@
-use std::{io::{Error, Result, copy}, net::{TcpListener, TcpStream}, thread};
+// use std::{io::{Error, Result, copy}, net::{TcpListener, TcpStream}, thread};
+use tokio::{io::{Result, copy}, net::{TcpListener, TcpStream}};
 
 const LISTEN_PORT: &str = "2345";
-const TARGET_PORT: &str = "5173";
+const TARGET_PORT: &str = "8080";
 
-pub fn forwarder() -> std::io::Result<()> {
+pub async fn forwarder() -> std::io::Result<()> {
     let listen_addr = format!("127.0.0.1:{}", LISTEN_PORT);
     let server_addr = format!("127.0.0.1:{}", TARGET_PORT);
 
     // receive from the client and communicate with actual server
-    let client_x = TcpListener::bind(listen_addr.as_str())?;
+    let client_x = TcpListener::bind(listen_addr.as_str()).await?;
     println!("Listening on {}", listen_addr);
 
-    for stream in client_x.incoming() {
+    loop {
+        let stream = client_x.accept().await;
         match stream {
             Ok(stream) => {
                 let server_addr = server_addr.clone();
 
-                thread::spawn(move || {
-                    let _ = handle_connection(stream, &server_addr);
+                tokio::spawn(async move {
+                    let _ = handle_connection(stream.0, &server_addr).await;
                 });
             },
-            Err(_) => eprintln!("Failed woefully"),
-        }        
+            Err(err) => {
+                eprintln!("Failed woefully {}", err);
+                break;
+            }
+        }
     }
     Ok(())
 }
 
 
-fn handle_connection(mut client: TcpStream, server_addr: &str) -> Result<()> {
-    let mut server = TcpStream::connect(server_addr)?;
+async fn handle_connection(client: TcpStream, server_addr: &str) -> Result<()> {
+    let server = TcpStream::connect(server_addr).await?;
 
     println!("Connected to upstream {}", server_addr);
 
-    let mut client_to_server = client.try_clone()?;
-    let mut server_to_client = server.try_clone()?;
+    let (mut client_reader, mut client_writer) = client.into_split();
+    let (mut  server_reader, mut server_writer) = server.into_split();
 
-    let client_to_server_thread = thread::spawn(move || {
-        copy(&mut client, &mut server)
+    let client_to_server_thread = tokio::spawn(async move {
+        copy(&mut client_reader, &mut server_writer).await
     });
 
-    let server_to_client_thread = thread::spawn(move || {
-        copy(&mut server_to_client, &mut client_to_server)
+    let server_to_client_thread = tokio::spawn(async move {
+        copy(&mut server_reader, &mut client_writer).await
     });
 
-    client_to_server_thread
-        .join()
-        .map_err(|_| Error::other("client -> server thread panicked"))??;
-
-    server_to_client_thread
-        .join()
-        .map_err(|_| Error::other("server -> client thread panicked"))??;
+    tokio::select! {
+        res = client_to_server_thread => res? ,
+        res = server_to_client_thread => res? ,
+    }?;
 
     Ok(())
 }
