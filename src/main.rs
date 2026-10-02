@@ -1,6 +1,7 @@
 mod server;
 mod client;
 mod forwarder;
+pub mod parser;
 
 use forwarder::forwarder::forwarder;
 
@@ -11,5 +12,6 @@ use forwarder::forwarder::forwarder;
 
 #[tokio::main]
 async fn main() {
+    // parser::parse_request("".into());
     let _ = forwarder().await;
 }

@@ -1,5 +1,7 @@
 // use std::{io::{Error, Result, copy}, net::{TcpListener, TcpStream}, thread};
-use tokio::{io::{Result, copy}, net::{TcpListener, TcpStream}};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt, Result, copy}, net::{TcpListener, TcpStream}};
+
+use crate::parser;
 
 const LISTEN_PORT: &str = "2345";
 const TARGET_PORT: &str = "8080";
@@ -41,11 +43,28 @@ async fn handle_connection(client: TcpStream, server_addr: &str) -> Result<()> {
     let (mut  server_reader, mut server_writer) = server.into_split();
 
     let client_to_server_thread = tokio::spawn(async move {
-        copy(&mut client_reader, &mut server_writer).await
+        // parse HTTP request
+        let mut buffer = [0u8; 4096];
+
+        let mut parser = parser::Parser::new();
+        loop {
+            let n = client_reader.read(&mut buffer).await.unwrap();
+            
+            if n == 0 {
+                break;
+            }
+            
+            parser.feed(&buffer[..n]).unwrap();
+
+            server_writer.write_all(&mut buffer[..n]).await?;
+        }
+        Result::<()>::Ok(())
+        // copy(&mut client_reader, &mut server_writer).await
     });
 
     let server_to_client_thread = tokio::spawn(async move {
-        copy(&mut server_reader, &mut client_writer).await
+        copy(&mut server_reader, &mut client_writer).await?;
+        Result::<()>::Ok(())
     });
 
     tokio::select! {
